@@ -52,17 +52,19 @@ class BarazStd(Peer):
         
         # Sort peers by id.  This is probably not a useful sort, but other 
         # sorts might be useful
-        peers.sort(key=lambda p: p.id)
+        # peers.sort(key=lambda p: p.id)
 
         # Get frequency counts of available needed pieces:
-        pieces_ranking = {}
+        pieces_count = {}
         for pc in needed_pieces:
-            pieces_ranking[pc] = 0
+            pieces_count[pc] = 0
         for peer in peers:
             for peer_pc in peer.available_pieces:
-                if peer_pc in pieces_ranking.keys():
-                    pieces_ranking[peer_pc] += 1
-        ranked_pieces = {k: v for k, v in sorted(pieces_ranking.items(), key=lambda x: x[1])}
+                if peer_pc in pieces_count.keys():
+                    pieces_count[peer_pc] += 1
+
+        # Sorts pieces based on ascending count for rarity
+        ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
 
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
@@ -84,7 +86,6 @@ class BarazStd(Peer):
                 start_block = self.pieces[isect_pieces[i]]
                 r = Request(self.id, peer.id, isect_pieces[i], start_block)
                 requests.append(r)
-
         return requests
 
     def uploads(self, requests, peers, history):
@@ -126,47 +127,43 @@ class BarazStd(Peer):
         for val in peer_uploads.values():
             if val > 0:
                 num_sharers += 1
+        # Sort received downloads in descending order
         sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
 
         uploads = []
 
-        if len(requests) == 0:
-            logging.debug("No one wants my pieces!")
-            # chosen = []
-            # bws = []
-        else:
-            logging.debug("Still here: uploading to a random peer")
-            # change my internal state for no reason
-            # self.dummy_state["cake"] = "pie"
-            extra_unblock = 0
-            if (round != 0 and round != 1):
-                to_unblock = min(num_sharers + 1, 4)
-                bws = even_split(self.up_bw, to_unblock)
-                extra_unblock = bws.pop()
-            else:   
-                to_unblock = min(num_sharers + 1, 3)
-                bws = even_split(self.up_bw, to_unblock)
-            
-            unblocked = set()
-            requesting_ids = set([request.requester_id for request in requests])
-            
-            # request = random.choice(requests)
-            # chosen = [request.requester_id]
-            # Evenly "split" my upload bandwidth among the one chosen requester
+        # if len(requests) == 0:
+        #     logging.debug("No one wants my pieces!")
+        #     # chosen = []
+        #     # bws = []
+        # else:
+        logging.debug("Still here: uploading to a random peer")
+        # change my internal state for no reason
+        # self.dummy_state["cake"] = "pie"
+        to_unblock = min(num_sharers + 1, 4)
+        bws = even_split(self.up_bw, to_unblock)
+        extra_unblock = bws.pop()
+        
+        unblocked = set()
+        requesting_ids = set([request.requester_id for request in requests])
+        
+        # request = random.choice(requests)
+        # chosen = [request.requester_id]
+        # Evenly "split" my upload bandwidth among the one chosen requester
 
-            for peer in sorted_peers.keys():
-                if bws != []:
-                    if peer in requesting_ids:
-                        uploads.append(Upload(self.id, peer, bws.pop()))
-                        unblocked.add(peer)
-            
-            # Opportunistic unblocking
-            if (round % 3 == 2):
-                opp_req = requesting_ids.difference(unblocked)
-                if len(opp_req) != 0:
-                    self.lucky = random.sample(opp_req, 1)
-            if self.lucky != self.id:
-                uploads.append(Upload(self.id, self.lucky, extra_unblock))
+        for peer in sorted_peers.keys():
+            if bws != []:
+                if peer in requesting_ids:
+                    uploads.append(Upload(self.id, peer, bws.pop()))
+                    unblocked.add(peer)
+        
+        # Opportunistic unblocking
+        if not round % 3:
+            opp_req = requesting_ids.difference(unblocked)
+            if len(opp_req) != 0:
+                self.lucky = random.sample(opp_req, 1)
+        if self.id != self.lucky:
+            uploads.append(Upload(self.id, self.lucky, extra_unblock))
                 
             
         return uploads
