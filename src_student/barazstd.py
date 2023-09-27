@@ -115,23 +115,27 @@ class BarazStd(Peer):
         random.shuffle(peers)
         peer_uploads = {}
         num_sharers = 0
+
+        # Initialize peers dictionary with no uploads 
         for peer in peers:
             peer_uploads[peer.id] = 0
 
+        # Set each peer's uploads as average from previous two rounds
         if round != 0:
             for download in history.downloads[prev]:
                 peer_uploads[download.from_id] += download.blocks/2
             for download in history.downloads[prev_prev]:
                 peer_uploads[download.from_id] += download.blocks/2
 
+        # Count how many peers uploaded anything at all to me
         for val in peer_uploads.values():
             if val > 0:
                 num_sharers += 1
+
         # Sort received downloads in descending order
         sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
 
         uploads = []
-
         # if len(requests) == 0:
         #     logging.debug("No one wants my pieces!")
         #     # chosen = []
@@ -140,7 +144,13 @@ class BarazStd(Peer):
         logging.debug("Still here: uploading to a random peer")
         # change my internal state for no reason
         # self.dummy_state["cake"] = "pie"
+
+
         to_unblock = min(num_sharers + 1, 4)
+        # If current optimistically unblocked peer ends up as top 3 uploaders to me, skip regular unblock of this peer
+        for peer in sorted_peers.keys():
+            if peer == self.lucky or round < 3:
+                to_unblock = min(num_sharers + 1, 3)
         bws = even_split(self.up_bw, to_unblock)
         extra_unblock = bws.pop()
         
@@ -151,17 +161,19 @@ class BarazStd(Peer):
         # chosen = [request.requester_id]
         # Evenly "split" my upload bandwidth among the one chosen requester
 
+        # Regular unblock of at most 3 peers
         for peer in sorted_peers.keys():
             if bws != []:
-                if peer in requesting_ids:
+                if peer in requesting_ids and peer != self.lucky:
                     uploads.append(Upload(self.id, peer, bws.pop()))
                     unblocked.add(peer)
         
-        # Opportunistic unblocking
+        # Optimistic unblocking every 3 rounds
         if not round % 3:
-            opp_req = requesting_ids.difference(unblocked)
-            if len(opp_req) != 0:
-                self.lucky = random.sample(opp_req, 1)
+            # Take difference of requesters and regularly unblocked peers
+            opt_req = requesting_ids.difference(unblocked)
+            if len(opt_req) != 0:
+                self.lucky = random.sample(opt_req, 1)[0]
         if self.id != self.lucky:
             uploads.append(Upload(self.id, self.lucky, extra_unblock))
                 
