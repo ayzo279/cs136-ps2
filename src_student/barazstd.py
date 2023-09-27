@@ -32,6 +32,14 @@ class BarazStd(Peer):
         needed_pieces = list(filter(needed, list(range(len(self.pieces)))))
         np_set = set(needed_pieces)  # sets support fast intersection ops.
 
+        # Get ranking of rarest pieces:
+        pieces_ranking = {}
+        for pc in needed_pieces:
+            pieces_ranking[pc] = 0
+        for peer in peers:
+            for peer_pc in peer.available_pieces:
+                pieces_ranking[peer_pc] += 1
+        pieces_ranking = {k: v for k, v in sorted(pieces_ranking.items(), key=lambda x: x[1])}
 
         logging.debug("%s here: still need pieces %s" % (
             self.id, needed_pieces))
@@ -48,9 +56,12 @@ class BarazStd(Peer):
         # Symmetry breaking is good...
         random.shuffle(needed_pieces)
         
+        ## TODO: Sort Peers by avg. received download rate in last round
         # Sort peers by id.  This is probably not a useful sort, but other 
         # sorts might be useful
         peers.sort(key=lambda p: p.id)
+
+
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
         for peer in peers:
@@ -67,6 +78,9 @@ class BarazStd(Peer):
                 start_block = self.pieces[piece_id]
                 r = Request(self.id, peer.id, piece_id, start_block)
                 requests.append(r)
+
+
+
 
         return requests
 
