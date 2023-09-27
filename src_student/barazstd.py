@@ -18,6 +18,7 @@ class BarazStd(Peer):
         print(("post_init(): %s here!" % self.id))
         self.dummy_state = dict()
         self.dummy_state["cake"] = "lie"
+        self.lucky = self.id
     
     def requests(self, peers, history):
         """
@@ -109,19 +110,67 @@ class BarazStd(Peer):
         # has a list of Download objects for each Download to this peer in
         # the previous round.
 
+        # Iterate through peers and count how much they've sent to this agent   
+        random.shuffle(peers)
+        peer_uploads = {}
+        num_sharers = 0
+        for peer in peers:
+            peer_uploads[peer.id] = 0
+
+        if round != 0:
+            for download in history.downloads[prev]:
+                peer_uploads[download.from_id] += download.blocks/2
+            for download in history.downloads[prev_prev]:
+                peer_uploads[download.from_id] += download.blocks/2
+
+        for val in peer_uploads.values():
+            if val > 0:
+                num_sharers += 1
+        sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
+
         if len(requests) == 0:
             logging.debug("No one wants my pieces!")
             chosen = []
             bws = []
+            uploads = []
         else:
             logging.debug("Still here: uploading to a random peer")
             # change my internal state for no reason
             self.dummy_state["cake"] = "pie"
-
-            request = random.choice(requests)
-            chosen = [request.requester_id]
+            extra_unblock = -1
+            if (round != 0 and round != 1):
+                to_unblock = min(min(num_sharers + 1, 4), len(peers))
+                bws = even_split(self.up_bw, to_unblock)
+                extra_unblock = bws.pop()
+            else:   
+                to_unblock = min(min(num_sharers + 1, 3), len(peers))
+                bws = even_split(self.up_bw, to_unblock)
+            
+            unblocked = set()
+            requesting_ids = set([request.requester_id for request in requests])
+            
+            # request = random.choice(requests)
+            # chosen = [request.requester_id]
+            uploads = []
             # Evenly "split" my upload bandwidth among the one chosen requester
-            bws = even_split(self.up_bw, len(chosen))
+
+            for peer in sorted_peers.keys():
+                if bws != []:
+                    if peer in requesting_ids:
+                        uploads.append(Upload(self.id, peer, bws.pop()))
+                        unblocked.add(peer)
+            
+            # Opportunistic unblocking
+            if (round % 3 == 2):
+                opp_req = requesting_ids.difference(unblocked)
+                if len(opp_req) != 0 :
+                    self.lucky = random.sample(opp_req, 1)
+            if self.lucky != self.id:
+                uploads.append(Upload(self.id, self.lucky, extra_unblock))
+                
+            
+        return uploads
+
 
         # create actual uploads out of the list of peer ids and bandwidths
         uploads = [Upload(self.id, peer_id, bw)
