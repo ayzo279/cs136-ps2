@@ -100,7 +100,7 @@ class BarazStd(Peer):
 
         round = history.current_round()
         prev = max(0, round - 1)
-        prev_prev = max(prev, round - 2)
+        prev_prev = max(0, round - 2)
 
         logging.debug("%s again.  It's round %d." % (
             self.id, round))
@@ -128,22 +128,23 @@ class BarazStd(Peer):
                 num_sharers += 1
         sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
 
+        uploads = []
+
         if len(requests) == 0:
             logging.debug("No one wants my pieces!")
-            chosen = []
-            bws = []
-            uploads = []
+            # chosen = []
+            # bws = []
         else:
             logging.debug("Still here: uploading to a random peer")
             # change my internal state for no reason
-            self.dummy_state["cake"] = "pie"
-            extra_unblock = -1
+            # self.dummy_state["cake"] = "pie"
+            extra_unblock = 0
             if (round != 0 and round != 1):
-                to_unblock = min(min(num_sharers + 1, 4), len(peers))
+                to_unblock = min(num_sharers + 1, 4)
                 bws = even_split(self.up_bw, to_unblock)
                 extra_unblock = bws.pop()
             else:   
-                to_unblock = min(min(num_sharers + 1, 3), len(peers))
+                to_unblock = min(num_sharers + 1, 3)
                 bws = even_split(self.up_bw, to_unblock)
             
             unblocked = set()
@@ -151,7 +152,6 @@ class BarazStd(Peer):
             
             # request = random.choice(requests)
             # chosen = [request.requester_id]
-            uploads = []
             # Evenly "split" my upload bandwidth among the one chosen requester
 
             for peer in sorted_peers.keys():
@@ -163,17 +163,10 @@ class BarazStd(Peer):
             # Opportunistic unblocking
             if (round % 3 == 2):
                 opp_req = requesting_ids.difference(unblocked)
-                if len(opp_req) != 0 :
+                if len(opp_req) != 0:
                     self.lucky = random.sample(opp_req, 1)
             if self.lucky != self.id:
                 uploads.append(Upload(self.id, self.lucky, extra_unblock))
                 
-            
-        return uploads
-
-
-        # create actual uploads out of the list of peer ids and bandwidths
-        uploads = [Upload(self.id, peer_id, bw)
-                   for (peer_id, bw) in zip(chosen, bws)]
             
         return uploads
