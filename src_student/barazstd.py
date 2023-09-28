@@ -1,11 +1,5 @@
 #!/usr/bin/python
 
-# This is a dummy peer that just illustrates the available information your peers 
-# have available.
-
-# You'll want to copy this file to AgentNameXXX.py for various versions of XXX,
-# probably get rid of the silly logging messages, and then add more logic.
-
 import random
 import logging
 
@@ -70,22 +64,19 @@ class BarazStd(Peer):
         # (up to self.max_requests from each)
         for peer in peers:
             av_set = set(peer.available_pieces)
-            isect = av_set.intersection(np_set)
+            isect = list(av_set.intersection(np_set))
             n = min(self.max_requests, len(isect))
             # More symmetry breaking -- ask for random pieces.
             # This would be the place to try fancier piece-requesting strategies
             # to avoid getting the same thing from multiple peers at a time.
-            isect_pieces = []
-            for pc in ranked_pieces:
-                if pc in isect:
-                    isect_pieces.append(pc)
+            random.shuffle(isect)
+            isect_pieces = sorted(isect, key=lambda x: ranked_pieces[x])
+
             for i in range(n):
-                # aha! The peer has this piece! Request it.
-                # which part of the piece do we need next?
-                # (must get the next-needed blocks in order)
                 start_block = self.pieces[isect_pieces[i]]
                 r = Request(self.id, peer.id, isect_pieces[i], start_block)
                 requests.append(r)
+
         return requests
 
     def uploads(self, requests, peers, history):
@@ -145,15 +136,6 @@ class BarazStd(Peer):
 
             # Sort received downloads in descending order
             sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
-
-            # # Evenly "split" my upload bandwidth
-            # to_unblock = min(num_sharers + 1, 4)
-            # # If current optimistically unblocked peer ends up as top 3 uploaders to me, skip regular unblock of this peer
-            # for peer in sorted_peers.keys():
-            #     if peer == self.lucky or round < 3:
-            #         to_unblock = min(num_sharers + 1, 3)
-            # bws = even_split(self.up_bw, to_unblock)
-            # extra_unblock = bws.pop()
             
             # Intialize a set of all the IDs of requesters
             requesting_ids = set([request.requester_id for request in requests])
