@@ -43,10 +43,6 @@ class BarazStd(Peer):
         requests = []   # We'll put all the things we want here
         # Symmetry breaking is good...
         random.shuffle(needed_pieces)
-        
-        # Sort peers by id.  This is probably not a useful sort, but other 
-        # sorts might be useful
-        # peers.sort(key=lambda p: p.id)
 
         # Get frequency counts of available needed pieces:
         pieces_count = {}
@@ -107,6 +103,7 @@ class BarazStd(Peer):
 
         if len(requests) == 0:
             logging.debug("No one wants my pieces!")
+            
         else:
             logging.debug("Still here: uploading my pieces!")
 
