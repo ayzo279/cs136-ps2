@@ -12,6 +12,11 @@ class BarazTyrant(Peer):
         print(("post_init(): %s here!" % self.id))
         self.dummy_state = dict()
         self.dummy_state["cake"] = "lie"
+        
+        self.d_i = {} # tracks d_i
+        self.u_i = {} # tracks u_i
+        self.prev_unblocks = {} # tracks how many blocks peers gave to us the last time they unblocked us
+        self.unblockers = [] # list of sets of peers who unblocked us (appended to each round)
     
     def requests(self, peers, history):
         """
@@ -25,6 +30,7 @@ class BarazTyrant(Peer):
         needed = lambda i: self.pieces[i] < self.conf.blocks_per_piece
         needed_pieces = list(filter(needed, list(range(len(self.pieces)))))
         np_set = set(needed_pieces)  # sets support fast intersection ops.
+
 
 
         logging.debug("%s here: still need pieces %s" % (
@@ -44,22 +50,35 @@ class BarazTyrant(Peer):
         
         # Sort peers by id.  This is probably not a useful sort, but other 
         # sorts might be useful
-        peers.sort(key=lambda p: p.id)
+        # peers.sort(key=lambda p: p.id)
+
+        # Get frequency counts of available needed pieces:
+        pieces_count = {}
+        for pc in needed_pieces:
+            pieces_count[pc] = 0
+        for peer in peers:
+            for peer_pc in peer.available_pieces:
+                if peer_pc in pieces_count.keys():
+                    pieces_count[peer_pc] += 1
+
+        # Sorts pieces based on ascending count for rarity
+        ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
+
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
         for peer in peers:
             av_set = set(peer.available_pieces)
-            isect = av_set.intersection(np_set)
+            isect = list(av_set.intersection(np_set))
             n = min(self.max_requests, len(isect))
             # More symmetry breaking -- ask for random pieces.
             # This would be the place to try fancier piece-requesting strategies
             # to avoid getting the same thing from multiple peers at a time.
-            for piece_id in random.sample(sorted(isect), n):
-                # aha! The peer has this piece! Request it.
-                # which part of the piece do we need next?
-                # (must get the next-needed blocks in order)
-                start_block = self.pieces[piece_id]
-                r = Request(self.id, peer.id, piece_id, start_block)
+            random.shuffle(isect)
+            isect_pieces = sorted(isect, key=lambda x: ranked_pieces[x])
+
+            for i in range(n):
+                start_block = self.pieces[isect_pieces[i]]
+                r = Request(self.id, peer.id, isect_pieces[i], start_block)
                 requests.append(r)
 
         return requests
@@ -74,31 +93,84 @@ class BarazTyrant(Peer):
 
         In each round, this will be called after requests().
         """
-
         round = history.current_round()
+        prev = max(0, round - 1)
+
+        # Initizalize empty list of uploads
+        uploads = []
+
+        # In round 0, initialize dictionaries to keep track of d_i, u_i, and 
+        # how many blocks were given to us the last time a peer unblocked us
+        if round == 0:
+            random.shuffle(peers)
+            for peer in peers:
+                self.d_i[peer.id] = 0
+                self.u_i[peer.id] = 14 # min-bw
+                self.prev_unblocks[peer.id] = 0 # number of blocks we were given by this peer
+            
+            return uploads
+
         logging.debug("%s again.  It's round %d." % (
             self.id, round))
+
         # One could look at other stuff in the history too here.
         # For example, history.downloads[round-1] (if round != 0, of course)
         # has a list of Download objects for each Download to this peer in
         # the previous round.
+        logging.debug("Printing history...%s" % history.downloads)
 
-        if len(requests) == 0:
-            logging.debug("No one wants my pieces!")
-            chosen = []
-            bws = []
-        else:
-            logging.debug("Still here: uploading to a random peer")
-            # change my internal state for no reason
-            self.dummy_state["cake"] = "pie"
+        # Track who unblocked us in last round
+        set_prev_unblockers = set()
+        for download in history.downloads[prev]:
+            self.prev_unblocks[download.from_id] = download.blocks
+            set_prev_unblockers.add(download.from_id)
+        self.unblockers.append(set_prev_unblockers)
 
-            request = random.choice(requests)
-            chosen = [request.requester_id]
-            # Evenly "split" my upload bandwidth among the one chosen requester
-            bws = even_split(self.up_bw, len(chosen))
+        # Estimate d_i
+        requesting_ids = [request.requester_id for request in requests]
+        for requester in requesting_ids:
+            for peer in peers:
+                if peer.id == requester:
+                    if self.prev_unblocks[requester] != 0: # they did unblock us in a previous round
+                        self.d_i[requester] = self.prev_unblocks[requester]
+                    else: # they have not unblocked us in a previous round
+                        self.d_i[requester] = len(peer.available_pieces) / (prev * 4)
 
-        # create actual uploads out of the list of peer ids and bandwidths
-        uploads = [Upload(self.id, peer_id, bw)
-                   for (peer_id, bw) in zip(chosen, bws)]
-            
+        # Track who we unblocked in last round
+        set_prev_receivers = set()
+        for upload in history.uploads[prev]:
+            set_prev_receivers.add(upload.to_id)
+
+        # Estimate u_i
+        alpha = 0.2
+        gamma = 0.1
+        
+        for requester in requesting_ids:
+            for peer in peers:
+                if peer.id == requester:
+                    # If we unblocked them, but they did not unblock us
+                    if requester in set_prev_receivers and requester not in set_prev_unblockers:
+                        self.u_i[requester] *= (1 + alpha)
+                    # If they unblock us for the last 3 rounds in a row
+                    elif requester in self.unblockers[-1] and requester in self.unblockers[-2] and requester in self.unblockers[-3]:
+                        self.u_i[requester] *= (1 - gamma)
+        
+        # Calculate ROI = d_i / u_i
+        di_ui = {}
+        for requester in requesting_ids:
+            di_ui[requester] = self.d_i[requester] / self.u_i[requester]
+
+        # Sort requesters by ROI in descending order
+        sorted_requesters = {k: v for k, v in sorted(di_ui.items(), key=lambda x: x[1], reverse=True)}
+        
+        bw_remaining = self.up_bw
+        for peer in sorted_requesters:
+            bw_required = self.u_i[peer]
+            if bw_remaining - bw_required > 0:
+                uploads.append(Upload(self.id, peer, bw_required))
+                bw_remaining -= bw_required
+            else:
+                uploads.append(Upload(self.id, peer, int(bw_remaining)))
+                break
+
         return uploads
