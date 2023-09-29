@@ -48,13 +48,14 @@ class BarazPropShare(Peer):
         pieces_count = {}
         for pc in needed_pieces:
             pieces_count[pc] = 0
+            
         for peer in peers:
             for peer_pc in peer.available_pieces:
                 if peer_pc in pieces_count.keys():
                     pieces_count[peer_pc] += 1
 
         # Sorts pieces based on ascending count for rarity
-        ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
+        # ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
 
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
@@ -66,7 +67,7 @@ class BarazPropShare(Peer):
             # This would be the place to try fancier piece-requesting strategies
             # to avoid getting the same thing from multiple peers at a time.
             random.shuffle(isect)
-            isect_pieces = sorted(isect, key=lambda x: ranked_pieces[x])
+            isect_pieces = sorted(isect, key=lambda x: pieces_count[x])
 
             for i in range(n):
                 start_block = self.pieces[isect_pieces[i]]
@@ -122,9 +123,12 @@ class BarazPropShare(Peer):
                     # Increment total received
                     total_received += download.blocks
                     # Store how much was received from each agent
-                    last_received[download.from_id] = download.blocks
+                    if download.from_id in unblocked:
+                        last_received[download.from_id] += download.blocks
+                    else:
+                        last_received[download.from_id] = download.blocks
                     # Add to set of agent to unblock
-                    unblocked.add(download.from_id)
+                        unblocked.add(download.from_id)
             # Add padding for optimistic unblocking        
             total_received += total_received/9
 

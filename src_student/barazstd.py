@@ -88,9 +88,22 @@ class BarazStd(Peer):
         round = history.current_round()
         prev = max(0, round - 1)
         prev_prev = max(0, round - 2)
+        leecher = True
 
         logging.debug("%s again.  It's round %d." % (
             self.id, round))
+
+
+        needed = lambda i: self.pieces[i] < self.conf.blocks_per_piece
+        needed_pieces = list(filter(needed, list(range(len(self.pieces)))))
+        # Intialize a set of all the IDs of requesters
+        requesting_ids = set([request.requester_id for request in requests])
+        # Regular unblock of at most 3 peers
+        unblocked = set()
+
+        np_set = set(needed_pieces)  # sets support fast intersection ops.
+        if np_set == set():
+            leecher = False
 
         # One could look at other stuff in the history too here.
         # For example, history.downloads[round-1] (if round != 0, of course)
@@ -100,67 +113,85 @@ class BarazStd(Peer):
 
         # Initizalize empty list of uploads
         uploads = []
-
         if len(requests) == 0:
             logging.debug("No one wants my pieces!")
             
         else:
             logging.debug("Still here: uploading my pieces!")
 
-            # Iterate through randomly shuffled peers and count how much they've sent to this agent   
-            random.shuffle(peers)
-            peer_uploads = {}
-            num_sharers = 0
+            if leecher:
+                # Iterate through randomly shuffled peers and count how much they've sent to this agent   
+                random.shuffle(peers)
+                peer_uploads = {}
+                num_sharers = 0
 
-            # Initialize peers dictionary to keep track of received downloads
-            for peer in peers:
-                peer_uploads[peer.id] = 0
+                # Initialize peers dictionary to keep track of received downloads
+                for peer in peers:
+                    peer_uploads[peer.id] = 0
 
-            # Set each peer's uploads as average from previous two rounds
-            if round > 1:
-                for download in history.downloads[prev]:
-                    peer_uploads[download.from_id] += download.blocks/2
-                for download in history.downloads[prev_prev]:
-                    peer_uploads[download.from_id] += download.blocks/2
-            elif round == 1:
-                for download in history.downloads[prev]:
-                    peer_uploads[download.from_id] += download.blocks
+                # Set each peer's uploads as average from previous two rounds
+                if round > 1:
+                    for download in history.downloads[prev]:
+                        peer_uploads[download.from_id] += download.blocks/2
+                    for download in history.downloads[prev_prev]:
+                        peer_uploads[download.from_id] += download.blocks/2
+                elif round == 1:
+                    for download in history.downloads[prev]:
+                        peer_uploads[download.from_id] += download.blocks
 
-            # Count how many peers uploaded anything at all to me
-            for val in peer_uploads.values():
-                if val > 0:
-                    num_sharers += 1
+                # Count how many peers uploaded anything at all to me
+                for val in peer_uploads.values():
+                    if val > 0:
+                        num_sharers += 1
 
-            # Sort received downloads in descending order
-            sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
-            
-            # Intialize a set of all the IDs of requesters
-            requesting_ids = set([request.requester_id for request in requests])
+                # Sort received downloads in descending order
+                sorted_peers = {k: v for k, v in sorted(peer_uploads.items(), key=lambda x: x[1], reverse=True)}
 
-            # Regular unblock of at most 3 peers
-            unblocked = set()
+                for peer in sorted_peers.keys():
+                    if len(unblocked) < 3:
+                        if peer in requesting_ids and peer != self.lucky:
+                            # uploads.append(Upload(self.id, peer, bws.pop()))
+                            unblocked.add(peer)
+                    else:
+                        break
+                
+                # Optimistic unblocking every 3 rounds
+                if round % 3 == 0:
+                    # Take difference of requesters and regularly unblocked peers
+                    opt_req = requesting_ids.difference(unblocked)
+                    if len(opt_req) != 0:
+                        self.lucky = random.sample(opt_req, 1)[0]
+                if self.id != self.lucky:
+                    unblocked.add(self.lucky)
+                
+                # Evenly "split" my upload bandwidth among unblocked peers
+                to_unblock = len(unblocked)
+                bws = even_split(self.up_bw, to_unblock)
+                for peer in unblocked:
+                    uploads.append(Upload(self.id, peer, bws.pop()))
+            else:
+                peer_downloads = {}
+                # Initialize peers dictionary to keep track of received downloads
+                for peer in peers:
+                    peer_downloads[peer.id] = 0
+                if round > 1:
+                    for upload in history.uploads[prev]:
+                        peer_downloads[upload.to_id] += upload.bw/2
+                    for upload in history.uploads[prev_prev]:
+                        peer_downloads[upload.to_id] += upload.bw/2
+                elif round == 1:
+                    for upload in history.uploads[prev]:
+                        peer_downloads[upload.to_id] += upload.bw
 
-            for peer in sorted_peers.keys():
-                if len(unblocked) < 3:
-                    if peer in requesting_ids and peer != self.lucky:
-                        # uploads.append(Upload(self.id, peer, bws.pop()))
-                        unblocked.add(peer)
-                else:
-                    break
-            
-            # Optimistic unblocking every 3 rounds
-            if round % 3 == 0:
-                # Take difference of requesters and regularly unblocked peers
-                opt_req = requesting_ids.difference(unblocked)
-                if len(opt_req) != 0:
-                    self.lucky = random.sample(opt_req, 1)[0]
-            if self.id != self.lucky:
-                unblocked.add(self.lucky)
-            
-            # Evenly "split" my upload bandwidth among unblocked peers
-            to_unblock = len(unblocked)
-            bws = even_split(self.up_bw, to_unblock)
-            for peer in unblocked:
-                uploads.append(Upload(self.id, peer, bws.pop()))
+                to_split = min(len(requesting_ids), 4)
+                # Sort received downloads in descending order
+                sorted_peer_downloads = {k: v for k, v in sorted(peer_downloads.items(), key=lambda x: x[1], reverse=True)}
+                for peer in sorted_peer_downloads.keys():
+                    if len(unblocked) < to_split:
+                        if peer in requesting_ids:
+                            unblocked.add(peer)
+                bws = even_split(self.up_bw, to_split)
+                for peer in unblocked:
+                    uploads.append(Upload(self.id, peer, bws.pop()))
 
         return uploads
