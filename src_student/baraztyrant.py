@@ -61,9 +61,6 @@ class BarazTyrant(Peer):
                 if peer_pc in pieces_count.keys():
                     pieces_count[peer_pc] += 1
 
-        # Sorts pieces based on ascending count for rarity
-        ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
-
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
         for peer in peers:
@@ -74,7 +71,7 @@ class BarazTyrant(Peer):
             # This would be the place to try fancier piece-requesting strategies
             # to avoid getting the same thing from multiple peers at a time.
             random.shuffle(isect)
-            isect_pieces = sorted(isect, key=lambda x: ranked_pieces[x])
+            isect_pieces = sorted(isect, key=lambda x: pieces_count[x])
 
             for i in range(n):
                 start_block = self.pieces[isect_pieces[i]]

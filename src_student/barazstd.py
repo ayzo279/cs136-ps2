@@ -27,8 +27,6 @@ class BarazStd(Peer):
         needed_pieces = list(filter(needed, list(range(len(self.pieces)))))
         np_set = set(needed_pieces)  # sets support fast intersection ops.
 
-
-
         logging.debug("%s here: still need pieces %s" % (
             self.id, needed_pieces))
 
@@ -53,9 +51,6 @@ class BarazStd(Peer):
                 if peer_pc in pieces_count.keys():
                     pieces_count[peer_pc] += 1
 
-        # Sorts pieces based on ascending count for rarity
-        ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
-
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
         for peer in peers:
@@ -66,8 +61,9 @@ class BarazStd(Peer):
             # This would be the place to try fancier piece-requesting strategies
             # to avoid getting the same thing from multiple peers at a time.
             random.shuffle(isect)
-            isect_pieces = sorted(isect, key=lambda x: ranked_pieces[x])
 
+            # Sort the intersection based on rarity of pieces
+            isect_pieces = sorted(isect, key=lambda x: pieces_count[x])
             for i in range(n):
                 start_block = self.pieces[isect_pieces[i]]
                 r = Request(self.id, peer.id, isect_pieces[i], start_block)
@@ -102,6 +98,8 @@ class BarazStd(Peer):
         unblocked = set()
 
         np_set = set(needed_pieces)  # sets support fast intersection ops.
+
+        # Switch to a seeder state if all pieces acquired
         if np_set == set():
             leecher = False
 

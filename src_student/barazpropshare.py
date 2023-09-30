@@ -54,9 +54,6 @@ class BarazPropShare(Peer):
                 if peer_pc in pieces_count.keys():
                     pieces_count[peer_pc] += 1
 
-        # Sorts pieces based on ascending count for rarity
-        # ranked_pieces = {k: v for k, v in sorted(pieces_count.items(), key=lambda x: x[1])}
-
         # request all available pieces from all peers!
         # (up to self.max_requests from each)
         for peer in peers:
@@ -88,7 +85,6 @@ class BarazPropShare(Peer):
         """
         round = history.current_round()
         prev = max(0, round - 1)
-        prev_prev = max(0, round - 2)
 
         logging.debug("%s again.  It's round %d." % (
             self.id, round))
